@@ -141,6 +141,14 @@ impl Writer {
             self.buffer.chars[row][col].write(blank);
         }
     }
+    
+    pub fn toggle_char(&mut self, row: usize, col: usize, char: char) {
+        let curr_char = self.buffer.chars[row][col].read();
+        let new_char = curr_char.ascii_character ^ (char as u8);
+        self.buffer.chars[row][col].write(ScreenChar {
+            ascii_character: new_char,
+            color_code: self.color_code,});
+    }
 }
 
 impl fmt::Write for Writer {
@@ -163,6 +171,11 @@ macro_rules! println {
     ($($arg:tt)*) => ($crate::print!("{}\n", format_args!($($arg)*)));
 }
 
+#[macro_export]
+macro_rules! toggle_char {
+    ($row:expr, $col:expr, $char:expr) => ($crate::vga_buffer::_toggle_char($row, $col, $char));
+}
+
 /// Prints the given formatted string to the VGA text buffer
 /// through the global `WRITER` instance.
 #[doc(hidden)]
@@ -172,6 +185,15 @@ pub fn _print(args: fmt::Arguments) {
 
     interrupts::without_interrupts(|| {
         WRITER.lock().write_fmt(args).unwrap();
+    });
+}
+
+#[doc(hidden)]
+pub fn _toggle_char(row: usize, col: usize, char: char) {
+    use x86_64::instructions::interrupts;
+    
+    interrupts::without_interrupts(|| {
+        WRITER.lock().toggle_char(row, col, char);
     });
 }
 

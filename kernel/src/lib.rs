@@ -4,15 +4,17 @@
 #![feature(alloc_error_handler)]
 #![feature(custom_test_frameworks)]
 #![feature(const_mut_refs)]
-#![feature(asm)]
+#![feature(naked_functions)]
 #![test_runner(crate::test_runner)]
 #![reexport_test_harness_main = "test_main"]
 
 use core::panic::PanicInfo;
+use core::arch::asm;
+use bootloader_api::info::FrameBufferInfo;
 extern crate alloc;
 
 #[cfg(test)]
-use bootloader::{entry_point, BootInfo};
+use bootloader_api::{entry_point, BootInfo};
 
 #[cfg(test)]
 entry_point!(test_kernel_main);
@@ -20,19 +22,21 @@ entry_point!(test_kernel_main);
 pub mod interrupts;
 pub mod gdt;
 pub mod serial;
-pub mod vga_buffer;
+pub mod framebuffer;
+pub mod logger;
+// pub mod vga_buffer;
 pub mod memory;
 pub mod allocator;
 pub mod task;
+pub mod scheduler;
+pub mod userspace;
+pub mod dummy_driver;
 
 pub fn init() {
-    use x86_64::registers::model_specific::LStar;
-    
     gdt::init();
+    unsafe { gdt::init_syscalls() };
     interrupts::init_idt();
     unsafe { interrupts::PICS.lock().initialize() };
-    
-    LStar::write(x86_64::addr::VirtAddr::from_ptr(syscall_handler as *const ()));
 }
 
 pub fn hlt_loop() -> ! {
@@ -41,8 +45,29 @@ pub fn hlt_loop() -> ! {
     }
 }
 
-pub fn syscall_handler() {
-    
+/// Initialize a text-based logger using the given pixel-based framebuffer as output.  
+pub fn init_logger(
+    info: FrameBufferInfo,
+    framebuffer: &'static mut [u8]
+) {
+    let logger = logger::LOGGER.get_or_init(move || {
+        logger::LockedLogger::new(
+            framebuffer,
+            info,
+        )
+    });
+    log::set_logger(logger).expect("logger already set");
+    log::set_max_level(log::LevelFilter::Info);
+    log::info!("Framebuffer info: {:?}", info);
+}
+
+#[naked]
+pub unsafe extern "C" fn syscall_wrapper() {
+    asm!(
+        "nop",
+        "iretq",
+        options(noreturn)
+    )
 }
 
 #[alloc_error_handler]
@@ -97,7 +122,7 @@ pub fn exit_qemu(exit_code: QemuExitCode) {
 }
 
 #[cfg(test)]
-fn test_kernel_main(_boot_info: &'static BootInfo) -> ! {
+fn test_kernel_main(_boot_info: &'static mut BootInfo) -> ! {
     init();
     test_main();
     hlt_loop();

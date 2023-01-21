@@ -1,10 +1,13 @@
-use bootloader::boot_info::{MemoryRegions, MemoryRegionKind};
+use bootloader_api::info::{MemoryRegions, MemoryRegionKind};
 use x86_64::{
     structures::paging::{
-        FrameAllocator, Mapper, OffsetPageTable, Page, PageTable, PhysFrame, Size4KiB,
+        FrameAllocator, OffsetPageTable, PageTable, PhysFrame, Size4KiB
     },
     PhysAddr, VirtAddr,
 };
+
+pub static mut PHYS_MEMORY_OFFSET: VirtAddr = VirtAddr::zero();
+// pub static mut FRAME_ALLOCATOR: *mut dyn FrameAllocator<Size4KiB> = 0;
 
 /// Initialize a new OffsetPageTable.
 ///
@@ -14,6 +17,7 @@ use x86_64::{
 /// to avoid aliasing `&mut` references (which is undefined behavior).
 pub unsafe fn init(physical_memory_offset: VirtAddr) -> OffsetPageTable<'static> {
     let level_4_table = active_level_4_table(physical_memory_offset);
+    
     OffsetPageTable::new(level_4_table, physical_memory_offset)
 }
 
@@ -89,31 +93,22 @@ fn translate_addr_inner(addr: VirtAddr, physical_memory_offset: VirtAddr)
 }
 
 /// Creates an example mapping for the given page to frame `0xb8000`.
-pub fn create_example_mapping(
-    page: Page,
-    mapper: &mut OffsetPageTable,
-    frame_allocator: &mut impl FrameAllocator<Size4KiB>,
-) {
-    use x86_64::structures::paging::PageTableFlags as Flags;
+// pub fn create_example_mapping(
+//     page: Page,
+//     mapper: &mut OffsetPageTable,
+//     frame_allocator: &mut impl FrameAllocator<Size4KiB>,
+// ) {
+//     use x86_64::structures::paging::PageTableFlags as Flags;
 
-    let frame = PhysFrame::containing_address(PhysAddr::new(0xb8000));
-    let flags = Flags::PRESENT | Flags::WRITABLE;
+//     let frame = PhysFrame::containing_address(PhysAddr::new(0xb8000));
+//     let flags = Flags::PRESENT | Flags::WRITABLE;
 
-    let map_to_result = unsafe {
-        // FIXME: this is not safe, we do it only for testing
-        mapper.map_to(page, frame, flags, frame_allocator)
-    };
-    map_to_result.expect("map_to failed").flush();
-}
-
-/// A FrameAllocator that always returns `None`.
-pub struct EmptyFrameAllocator;
-
-unsafe impl FrameAllocator<Size4KiB> for EmptyFrameAllocator {
-    fn allocate_frame(&mut self) -> Option<PhysFrame> {
-        None
-    }
-}
+//     let map_to_result = unsafe {
+//         // FIXME: this is not safe, we do it only for testing
+//         mapper.map_to(page, frame, flags, frame_allocator)
+//     };
+//     map_to_result.expect("map_to failed").flush();
+// }
 
 /// A FrameAllocator that returns usable frames from the bootloader's memory map.
 pub struct BootInfoFrameAllocator {
@@ -138,13 +133,14 @@ impl BootInfoFrameAllocator {
     fn usable_frames(&self) -> impl Iterator<Item = PhysFrame> {
         // get usable regions from memory map
         let regions = self.memory_map.iter();
-        let usable_regions = regions
-            .filter(|r| r.kind == MemoryRegionKind::Usable);
+        let usable_regions = regions.filter(|r| r.kind == MemoryRegionKind::Usable);
+        
         // map each region to its address range
-        let addr_ranges = usable_regions
-            .map(|r| r.start..r.end);
+        let addr_ranges = usable_regions.map(|r| r.start..r.end);
+        
         // transform to an iterator of frame start addresses
         let frame_addresses = addr_ranges.flat_map(|r| r.step_by(4096));
+        
         // create `PhysFrame` types from the start addresses
         frame_addresses.map(|addr| PhysFrame::containing_address(PhysAddr::new(addr)))
     }
@@ -156,11 +152,34 @@ unsafe impl FrameAllocator<Size4KiB> for BootInfoFrameAllocator {
         self.next += 1;
         frame
     }
+
+    // fn deallocate_frame(frame: PhysFrame) {
+
+    // }
 }
 
-// use alloc::boxed::Box;
-// fn new_user_page_table() -> Box<PageTable> {
-//     let mut pt = Box::new(PageTable::new());
-//     let cur_pt0 = get_page_table().entries[0].next_pt();
-//     pt
-// }
+pub fn print_mem_map(map: &'static MemoryRegions) {
+    use log::info;
+    for r in map.iter() {
+        info!("{0:#016x} - {1:#016x} {2:?}", r.start, r.end-1, r.kind)
+    }
+}
+
+pub fn usable_mem_count(map: &'static MemoryRegions) -> u64 {
+    let mut count: u64 = 0;
+    for r in map.iter() {
+        if r.kind == MemoryRegionKind::Usable {
+            count += r.end - r.start;
+        }
+    }
+    return count;
+}
+
+use alloc::boxed::Box;
+pub fn new_pt() -> Box<PageTable> {
+    let active_l4_pt = unsafe { active_level_4_table(PHYS_MEMORY_OFFSET) };
+    
+    let new_pt = Box::new(active_l4_pt.clone());
+    
+    new_pt
+}
