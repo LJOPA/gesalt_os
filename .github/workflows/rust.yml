@@ -16,10 +16,10 @@ jobs:
 
     steps:
     - uses: actions/checkout@v3
-    - name: Add target x86_64-unknown-none
-      run: rustup target add x86_64-unknown-none
-    - name: Pull rust-src
-      run: rustup component add rust-src --toolchain nightly-x86_64-unknown-linux-gnu
+    - name: Add target x86_64-unknown-none and pull rust-src
+      run: |
+        rustup target add x86_64-unknown-none
+        rustup component add rust-src --toolchain nightly-x86_64-unknown-linux-gnu
     - name: Build
       run: cargo build --verbose
     - name: Run tests
