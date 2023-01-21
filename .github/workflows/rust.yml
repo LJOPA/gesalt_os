@@ -16,6 +16,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v3
+    - name: Add target x86_64-unknown-none
+      run: rustup target add x86_64-unknown-none
     - name: Build
       run: cargo build --verbose
     - name: Run tests
