@@ -16,6 +16,7 @@ jobs:
 
     steps:
     - uses: actions/checkout@v3
+    - uses: Swatinem/rust-cache@v2
     - name: Add target x86_64-unknown-none, rust-src and llvm-tools-preview
       run: |
         rustup target add x86_64-unknown-none
